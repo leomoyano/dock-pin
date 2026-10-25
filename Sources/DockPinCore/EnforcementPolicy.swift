@@ -83,9 +83,10 @@ public enum PolicyState: Equatable, Sendable {
     case unknownPlacement(nextCheck: TimeInterval)
     case relocating(attempt: Int, deadline: TimeInterval)
     case cooldown(until: TimeInterval)
-    /// Monitor elegido desconectado: no se mueve nada ni se reintenta; solo un
-    /// cambio de display/wake/selección reevalúa.
-    case waitingForTarget
+    /// Chosen display not connected: nothing is moved, there are no relocation attempts.
+    /// A read-only re-check runs every poll interval, so a reconnect is noticed even
+    /// if the system never delivers a reconfiguration event for it.
+    case waitingForTarget(nextCheck: TimeInterval)
     /// Intentos agotados o error no reintentable: inactivo hasta un disparador externo.
     case gaveUp
 }
@@ -170,7 +171,7 @@ public struct EnforcementPolicy: Sendable {
     private mutating func apply(_ observation: Observation, now: TimeInterval) -> PolicyAction {
         guard observation.targetConnected else {
             attempts = 0
-            state = .waitingForTarget
+            state = .waitingForTarget(nextCheck: now + config.pollInterval)
             return .none
         }
         switch observation.placement {
@@ -206,6 +207,7 @@ public struct EnforcementPolicy: Sendable {
         case let .settling(until) where now >= until,
              let .cooldown(until) where now >= until,
              let .satisfied(until) where now >= until,
+             let .waitingForTarget(until) where now >= until,
              let .unknownPlacement(until) where now >= until:
             state = .checking(deadline: now + config.observationTimeout)
             return .requestObservation

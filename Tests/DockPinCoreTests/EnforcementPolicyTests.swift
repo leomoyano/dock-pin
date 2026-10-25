@@ -103,15 +103,28 @@ private struct Harness {
     }
 }
 
-@Test func disconnectedTargetMovesNothingAndNeverRetries() {
+@Test func disconnectedTargetMovesNothingAndOnlyRechecksReadOnly() {
     var h = Harness()
     h.reachChecking()
     #expect(h.send(.observed(Observation(targetConnected: false, placement: .unknown))) == .none)
-    #expect(h.policy.state == .waitingForTarget)
+    #expect({ if case .waitingForTarget = h.policy.state { return true } else { return false } }())
     for _ in 0..<50 {
-        h.advance(60)
-        #expect(h.send(.tick) == .none)
+        h.advance(h.config.pollInterval)
+        let action = h.send(.tick)
+        #expect(action == .none || action == .requestObservation)
+        if action == .requestObservation {
+            #expect(h.send(.observed(Observation(targetConnected: false, placement: .unknown))) == .none)
+        }
     }
+}
+
+@Test func reconnectedTargetIsNoticedByPollingWithoutAnyEvent() {
+    var h = Harness()
+    h.reachChecking()
+    _ = h.send(.observed(Observation(targetConnected: false, placement: .unknown)))
+    h.advance(h.config.pollInterval)
+    #expect(h.send(.tick) == .requestObservation)
+    #expect(h.send(.observed(Observation(targetConnected: true, placement: .onOtherDisplay))) != .none)
 }
 
 @Test func reconnectResumesEnforcement() {
