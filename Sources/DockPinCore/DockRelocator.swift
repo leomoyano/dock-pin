@@ -214,13 +214,17 @@ public struct CursorDockRelocator: DockRelocating {
         let steps = max(1, Int((config.dwell / config.step).rounded(.up)))
         for _ in 0..<steps {
             sleep(config.step)
-            // Cancelación o movimiento del usuario: soltar sin restaurar.
-            if cancel.isCancelled { return .failure(.cancelled) }
             guard let now = cursor.location() else { return .failure(.cursorUnavailable) }
             if hypot(now.x - edge.x, now.y - edge.y) > config.userMovementTolerance {
                 return .failure(.userInterrupted)
             }
             if cursor.isMouseButtonDown() { return .failure(.userInterrupted) }
+            // Programmatic cancel (stop, display change) with the user's hand still:
+            // put the cursor back where it was.
+            if cancel.isCancelled {
+                cursor.warp(to: original)
+                return .failure(.cancelled)
+            }
             cursor.nudge(at: edge)
         }
 

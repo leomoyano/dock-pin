@@ -82,6 +82,7 @@ private func makeRelocator(
     cursor.onTick = { _ in token.cancel() }
     let result = makeRelocator(cursor).relocate(to: right, among: [left, right], cancel: token)
     #expect(result == .failure(.cancelled))
+    #expect(cursor.position == CGPoint(x: 300, y: 400)) // programmatic cancel restores the cursor
     #expect(cursor.events.last == "reassociate")
 }
 
