@@ -41,7 +41,7 @@ func runStatus() {
 }
 
 /// Runs the enforcement driver in the foreground until SIGINT/SIGTERM. MOVES THE POINTER.
-func runWatch(selector: DisplaySelector?) -> Never {
+func runWatch(selector: DisplaySelector?, guardEnabled: Bool) -> Never {
     let provider = SystemDisplayProvider()
     let store = PinnedDisplayStore()
 
@@ -59,7 +59,20 @@ func runWatch(selector: DisplaySelector?) -> Never {
     print("Watching: keeping the Dock on \(selected.uuid). Press Ctrl-C to stop.")
     print("Note: this MOVES THE POINTER when the Dock is on another display. Quit other Dock controllers first.")
 
+    if guardEnabled {
+        print("Edge guard: the pointer is held back from the bottom edge of every other display (needs Accessibility).")
+        print("Dragging (button held) is not affected. Do not run DockLock Lite or similar tools at the same time.")
+    }
+
     let cursor = SystemCursor()
+    let edgeGuard: EdgeGuard? = guardEnabled
+        ? EdgeGuard(
+            tap: SystemEventTap(),
+            trust: SystemAccessibilityTrust(),
+            displayProvider: provider,
+            events: SystemEventObserver(),
+            isMouseButtonDown: { cursor.isMouseButtonDown() })
+        : nil
     let driver = EnforcementDriver(
         store: store,
         displayProvider: provider,
@@ -70,6 +83,8 @@ func runWatch(selector: DisplaySelector?) -> Never {
         events: SystemEventObserver(),
         activity: SystemUserActivity(),
         scheduler: DispatchScheduler(),
+        edgeGuard: edgeGuard,
+        onGuardState: { print("[\(timestamp())] \($0)") },
         onStatus: { print("[\(timestamp())] \($0)") })
 
     signal(SIGINT, SIG_IGN)

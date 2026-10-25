@@ -37,6 +37,8 @@ public final class EnforcementDriver: @unchecked Sendable {
     private let scheduler: Scheduling
     private let config: DriverConfig
     private let onStatus: @Sendable (DockStatus) -> Void
+    private let edgeGuard: EdgeGuarding?
+    private let onGuardState: @Sendable (GuardState) -> Void
 
     private var running = false
     private var policy: EnforcementPolicy?
@@ -55,6 +57,7 @@ public final class EnforcementDriver: @unchecked Sendable {
     private var lastUnknownReason: UnknownReason?
 
     public private(set) var status: DockStatus = .stopped
+    public private(set) var guardState: GuardState = .inactive
 
     public init(
         store: PinnedDisplayStore,
@@ -67,6 +70,8 @@ public final class EnforcementDriver: @unchecked Sendable {
         activity: UserActivityProviding,
         scheduler: Scheduling,
         config: DriverConfig = DriverConfig(),
+        edgeGuard: EdgeGuarding? = nil,
+        onGuardState: @escaping @Sendable (GuardState) -> Void = { _ in },
         onStatus: @escaping @Sendable (DockStatus) -> Void = { _ in }
     ) {
         self.store = store
@@ -80,6 +85,8 @@ public final class EnforcementDriver: @unchecked Sendable {
         self.scheduler = scheduler
         self.config = config
         self.onStatus = onStatus
+        self.edgeGuard = edgeGuard
+        self.onGuardState = onGuardState
     }
 
     // MARK: - Lifecycle
@@ -90,6 +97,9 @@ public final class EnforcementDriver: @unchecked Sendable {
         knownSelection = store.selected
         policy = EnforcementPolicy(config: config.enforcement, now: scheduler.now)
         resetFacts()
+        edgeGuard?.setPinned(knownSelection)
+        edgeGuard?.start()
+        refreshGuardState()
         events.start { [weak self] trigger in self?.handle(trigger) }
         scheduleTick()
         refreshStatus()
@@ -103,6 +113,8 @@ public final class EnforcementDriver: @unchecked Sendable {
         tickHandle?.cancel()
         tickHandle = nil
         events.stop()
+        edgeGuard?.stop()
+        refreshGuardState()
         currentToken?.cancel()
         if inFlight {
             // Give the relocator the chance to restore the cursor before returning.
@@ -139,6 +151,8 @@ public final class EnforcementDriver: @unchecked Sendable {
 
     private func tick() {
         guard running else { return }
+        edgeGuard?.tick()
+        refreshGuardState()
         checkSelectionChange()
         if knownSelection != nil {
             if permissionMissing, trust.isTrusted {
@@ -158,6 +172,7 @@ public final class EnforcementDriver: @unchecked Sendable {
         let current = store.selected
         guard current != knownSelection else { return }
         knownSelection = current
+        edgeGuard?.setPinned(current)
         resetFacts()
         if current != nil {
             feed(.selectionChanged)
@@ -272,6 +287,12 @@ public final class EnforcementDriver: @unchecked Sendable {
         permissionMissing = false
         giveUpCause = nil
         lastUnknownReason = nil
+    }
+
+    private func refreshGuardState() {
+        guard let edgeGuard, edgeGuard.state != guardState else { return }
+        guardState = edgeGuard.state
+        onGuardState(guardState)
     }
 
     private func refreshStatus() {

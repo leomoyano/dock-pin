@@ -10,8 +10,11 @@ Uso:
   dockpin-probe relocate --to <uuid|índice> --once
                                                   UN intento acotado: MUEVE EL CURSOR. Requiere Accesibilidad.
   dockpin-probe status                            Prints the saved selection and the current Dock location. Read-only.
-  dockpin-probe watch [--to <uuid|index>]         Keeps the Dock pinned in the foreground until Ctrl-C.
+  dockpin-probe watch [--to <uuid|index>] [--guard]
+                                                  Keeps the Dock pinned in the foreground until Ctrl-C.
                                                   MOVES THE POINTER. Saves the selection; without --to reuses it.
+                                                  --guard also installs the edge guard (event tap) that keeps the
+                                                  pointer off the bottom edge of the other displays.
 """
 
 func fail(_ message: String, code: Int32 = 1) -> Never {
@@ -110,6 +113,7 @@ case "status":
 case "watch":
     var rest = Array(args.dropFirst())
     var selector: DisplaySelector?
+    var guardEnabled = false
     while let arg = rest.first {
         rest.removeFirst()
         switch arg {
@@ -119,10 +123,11 @@ case "watch":
             }
             selector = parsed
             rest.removeFirst()
+        case "--guard": guardEnabled = true
         default: fail("Unknown argument: \(arg)\n\n\(usage)", code: 64)
         }
     }
-    runWatch(selector: selector)
+    runWatch(selector: selector, guardEnabled: guardEnabled)
 
 default:
     print(usage)

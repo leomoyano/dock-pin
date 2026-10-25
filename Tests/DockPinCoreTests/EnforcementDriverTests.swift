@@ -111,6 +111,20 @@ private final class FakeCursor: CursorControlling, @unchecked Sendable {
 
 private final class StatusLog: @unchecked Sendable {
     var values: [DockStatus] = []
+    var guardValues: [GuardState] = []
+}
+
+private final class FakeGuard: EdgeGuarding, @unchecked Sendable {
+    var state: GuardState = .inactive
+    /// State the guard reaches when started.
+    var startsAs: GuardState = .active
+    var calls: [String] = []
+    var pinned: DisplayIdentity?
+
+    func start() { calls.append("start"); state = startsAs }
+    func stop() { calls.append("stop"); state = .inactive }
+    func setPinned(_ identity: DisplayIdentity?) { calls.append("pin"); pinned = identity }
+    func tick() { calls.append("tick") }
 }
 
 // MARK: - Rig
@@ -136,6 +150,7 @@ private final class Rig {
     let cursor = FakeCursor()
     let persistence = InMemoryPersistence()
     let log = StatusLog()
+    let edgeGuard = FakeGuard()
     let driver: EnforcementDriver
     var store: PinnedDisplayStore { PinnedDisplayStore(persistence: persistence) }
 
@@ -152,6 +167,8 @@ private final class Rig {
             displayProvider: displays, locator: locator, relocator: relocator,
             trust: trust, cursor: cursor, events: events, activity: activity,
             scheduler: scheduler, config: config,
+            edgeGuard: edgeGuard,
+            onGuardState: { log.guardValues.append($0) },
             onStatus: { log.values.append($0) })
         let locator = self.locator
         relocator.onRelocate = { _ in locator.placement = .onDisplay(pinned?.identity ?? d2.identity) }
@@ -388,4 +405,60 @@ private final class Rig {
     #expect(rig.driver.status == .checking)
     rig.run(2.0)
     #expect(rig.driver.status == .pinned(d2.identity))
+}
+
+// MARK: - Edge guard integration
+
+@Test func driverStartsTheGuardWithTheSelectionAndStopsItWithTheDriver() {
+    let rig = Rig()
+    rig.driver.start()
+    #expect(rig.edgeGuard.calls.prefix(2) == ["pin", "start"])
+    #expect(rig.edgeGuard.pinned == d2.identity)
+    #expect(rig.driver.guardState == .active)
+    #expect(rig.log.guardValues == [.active])
+
+    rig.driver.stop()
+    #expect(rig.edgeGuard.calls.last == "stop")
+    #expect(rig.driver.guardState == .inactive)
+    #expect(rig.log.guardValues == [.active, .inactive])
+}
+
+@Test func guardPermissionMissingIsReportedAndPostHocCorrectionStillRuns() {
+    let rig = Rig()
+    rig.edgeGuard.startsAs = .permissionMissing
+    rig.driver.start()
+    #expect(rig.driver.guardState == .permissionMissing)
+    rig.run(10)
+    // The Dock was on the wrong display at startup: the fallback relocates it.
+    #expect(rig.relocator.calls == 1)
+    #expect(rig.driver.status == .pinned(d2.identity))
+}
+
+@Test func postHocCorrectionKeepsItsBudgetWhileTheGuardIsActive() {
+    let rig = Rig()
+    rig.relocator.onRelocate = { _ in } // the Dock never moves
+    rig.driver.start()
+    rig.run(120)
+    #expect(rig.driver.guardState == .active)
+    #expect(rig.relocator.calls == 3)
+}
+
+@Test func driverTicksTheGuardAndFollowsSelectionChanges() {
+    let rig = Rig()
+    rig.driver.start()
+    rig.run(1)
+    #expect(rig.edgeGuard.calls.contains("tick"))
+
+    rig.persistence.saveUUID(d1.identity.uuid)
+    rig.run(1)
+    #expect(rig.edgeGuard.pinned == d1.identity)
+}
+
+@Test func guardStateChangeAfterATickIsReported() {
+    let rig = Rig()
+    rig.edgeGuard.startsAs = .permissionMissing
+    rig.driver.start()
+    rig.edgeGuard.state = .active // granted later; the guard started itself on its tick
+    rig.run(1)
+    #expect(rig.log.guardValues == [.permissionMissing, .active])
 }
