@@ -9,6 +9,9 @@ Uso:
   dockpin-probe locate                            Dice en qué monitor está el Dock. Solo lectura.
   dockpin-probe relocate --to <uuid|índice> --once
                                                   UN intento acotado: MUEVE EL CURSOR. Requiere Accesibilidad.
+  dockpin-probe status                            Prints the saved selection and the current Dock location. Read-only.
+  dockpin-probe watch [--to <uuid|index>]         Keeps the Dock pinned in the foreground until Ctrl-C.
+                                                  MOVES THE POINTER. Saves the selection; without --to reuses it.
 """
 
 func fail(_ message: String, code: Int32 = 1) -> Never {
@@ -100,6 +103,26 @@ case "relocate":
     case let .failure(error):
         fail("Relocación no realizada: \(error.guidance)", code: 3)
     }
+
+case "status":
+    runStatus()
+
+case "watch":
+    var rest = Array(args.dropFirst())
+    var selector: DisplaySelector?
+    while let arg = rest.first {
+        rest.removeFirst()
+        switch arg {
+        case "--to":
+            guard let value = rest.first, let parsed = DisplaySelector.parse(value) else {
+                fail("--to requires a valid UUID or index.\n\n\(usage)", code: 64)
+            }
+            selector = parsed
+            rest.removeFirst()
+        default: fail("Unknown argument: \(arg)\n\n\(usage)", code: 64)
+        }
+    }
+    runWatch(selector: selector)
 
 default:
     print(usage)
