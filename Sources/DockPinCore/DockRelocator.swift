@@ -99,7 +99,7 @@ public struct SystemAccessibilityTrust: AccessibilityTrusting {
     public var isTrusted: Bool { AXIsProcessTrusted() }
 }
 
-public struct SystemCursor: CursorControlling {
+public struct SystemCursor: CursorControlling, Sendable {
     public init() {}
 
     public func location() -> CGPoint? { CGEvent(source: nil)?.location }
